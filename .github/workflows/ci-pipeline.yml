@@ -1,3 +1,115 @@
+name: CI - Test, Scan, Build & Publish
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: flask-app
+
+jobs:
+  test:
+    name: Run unit tests
+    runs-on: ubuntu-latest
+    outputs:
+      tests_passed: ${{ steps.run-tests.outcome }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Run pytest (generate JUnit XML + coverage)
+        id: run-tests
+        run: |
+          mkdir -p reports
+          pytest --junitxml=reports/test-results.xml --cov=. --cov-report=xml
+
+      - name: Upload test results artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results
+          path: reports/test-results.xml
+
+  security:
+    name: Security scans (depends on test)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install Safety
+        run: |
+          python -m pip install --upgrade pip
+          pip install safety
+
+      - name: Run Safety Scan
+        run: safety check
+
+      - name: Install Bandit
+        run: pip install bandit
+
+      - name: Run Bandit SAST
+        run: |
+          mkdir -p reports
+          bandit -r . -f json -o reports/bandit-report.json || true
+
+      - name: Upload Bandit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: reports/bandit-report.json
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image for Trivy scan
+        run: docker build -t ${{ env.IMAGE_NAME }}:ci-scan .
+
+      - name: Run Trivy image scan
+        run: |
+          mkdir -p reports
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v $PWD:/app \
+            -v $PWD/reports:/reports \
+            aquasec/trivy:latest \
+            image \
+            --exit-code 1 --severity HIGH,CRITICAL \
+            --format json -o /reports/trivy-image-report.json ${{ env.IMAGE_NAME }}:ci-scan
+
+      - name: Upload Trivy report
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report
+          path: reports/trivy-image-report.json
+
   build_and_push:
     name: Build & Push image (only if tests & scans pass)
     needs: [test, security]
@@ -13,7 +125,6 @@
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Step 4: Login to DockerHub using secrets
       - name: Login to DockerHub
         uses: docker/login-action@v2
         with:
