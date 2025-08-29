@@ -44,6 +44,7 @@ jobs:
         run: |
           mkdir -p reports
           pytest --junitxml=reports/test-results.xml --cov=. --cov-report=xml
+
       - name: Upload test results artifact
         uses: actions/upload-artifact@v4
         with:
@@ -58,11 +59,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install system dependencies (Trivy)
+        run: |
+          sudo apt-get update -y
+          xargs -a system-requirements.txt sudo apt-get install -y
+
       - name: Run Bandit SAST (Python)
         run: |
           python -m pip install bandit
           mkdir -p reports
           bandit -r . -f json -o reports/bandit-report.json || true
+
       - name: Upload Bandit report
         uses: actions/upload-artifact@v4
         with:
@@ -73,13 +80,10 @@ jobs:
         run: docker build -t ${{ env.IMAGE_NAME }}:ci-scan .
 
       - name: Run Trivy image scan
-        uses: aquasecurity/trivy-action@v0.10.0
-        with:
-          image-ref: ${{ env.IMAGE_NAME }}:ci-scan
-          format: 'json'
-          output: 'reports/trivy-image-report.json'
-          exit-code: '1'            # non-zero exit on HIGH/CRITICAL -> fail job
-          severity: 'HIGH,CRITICAL'
+        run: |
+          mkdir -p reports
+          trivy image --exit-code 1 --severity HIGH,CRITICAL --format json -o reports/trivy-image-report.json ${{ env.IMAGE_NAME }}:ci-scan
+
       - name: Upload Trivy report
         uses: actions/upload-artifact@v4
         with:
