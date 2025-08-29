@@ -51,7 +51,7 @@ jobs:
           name: pytest-results
           path: reports/test-results.xml
 
-  security:
+  security: 
     name: Security scans (depends on test)
     needs: test
     runs-on: ubuntu-latest
@@ -59,10 +59,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install system dependencies (Trivy)
+      # Install common system dependencies from system-requirements.txt
+      - name: Install system dependencies
         run: |
           sudo apt-get update -y
           xargs -a system-requirements.txt sudo apt-get install -y
+
+      # Install Trivy from Aqua Security official repo
+      - name: Install Trivy
+        run: |
+          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo deb https://aquasecurity.github.io/trivy-repo/deb stable main | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update -y
+          sudo apt-get install -y trivy
 
       - name: Run Bandit SAST (Python)
         run: |
