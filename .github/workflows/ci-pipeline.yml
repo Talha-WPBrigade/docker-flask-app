@@ -95,10 +95,17 @@ jobs:
       - name: Build Docker image for Trivy scan
         run: docker build -t ${{ env.IMAGE_NAME }}:ci-scan .
 
+      # ✅ Trivy scan with proper reports folder
       - name: Run Trivy image scan
         run: |
-          mkdir -p reports
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $PWD:/app aquasec/trivy:latest image --exit-code 1 --severity HIGH,CRITICAL --format json -o reports/trivy-image-report.json ${{ env.IMAGE_NAME }}:ci-scan
+          mkdir -p reports                # host folder
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v $PWD:/app \
+            -v $PWD/reports:/reports     # mount reports folder inside container
+            aquasec/trivy:latest \
+            image --exit-code 1 --severity HIGH,CRITICAL \
+            --format json -o /reports/trivy-image-report.json ${{ env.IMAGE_NAME }}:ci-scan
 
       - name: Upload Trivy report
         uses: actions/upload-artifact@v4
