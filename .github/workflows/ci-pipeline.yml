@@ -64,7 +64,6 @@ jobs:
         with:
           python-version: '3.x'
 
-      # Install Safety (Python)
       - name: Install Safety
         run: |
           python -m pip install --upgrade pip
@@ -73,7 +72,6 @@ jobs:
       - name: Run Safety Scan
         run: safety check
 
-      # Install Bandit (Python SAST)
       - name: Install Bandit
         run: pip install bandit
 
@@ -88,23 +86,22 @@ jobs:
           name: bandit-report
           path: reports/bandit-report.json
 
-      # Install Docker (for Trivy)
       - name: Set up Docker
         uses: docker/setup-buildx-action@v3
 
       - name: Build Docker image for Trivy scan
         run: docker build -t ${{ env.IMAGE_NAME }}:ci-scan .
 
-      # ✅ Trivy scan with proper reports folder
       - name: Run Trivy image scan
         run: |
-          mkdir -p reports                # host folder
+          mkdir -p reports
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v $PWD:/app \
-            -v $PWD/reports:/reports     # mount reports folder inside container
+            -v $PWD/reports:/reports \
             aquasec/trivy:latest \
-            image --exit-code 1 --severity HIGH,CRITICAL \
+            image \
+            --exit-code 1 --severity HIGH,CRITICAL \
             --format json -o /reports/trivy-image-report.json ${{ env.IMAGE_NAME }}:ci-scan
 
       - name: Upload Trivy report
