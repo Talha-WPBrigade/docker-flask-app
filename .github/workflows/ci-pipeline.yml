@@ -5,7 +5,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:    # allows manual run from Actions tab
+  workflow_dispatch:
 
 env:
   IMAGE_NAME: flask-app
@@ -51,7 +51,7 @@ jobs:
           name: pytest-results
           path: reports/test-results.xml
 
-  security: 
+  security:
     name: Security scans (depends on test)
     needs: test
     runs-on: ubuntu-latest
@@ -59,24 +59,26 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Install common system dependencies from system-requirements.txt
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update -y
-          xargs -a system-requirements.txt sudo apt-get install -y
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
 
-      # Install Trivy from Aqua Security official repo
-      - name: Install Trivy
+      # Install Safety (Python)
+      - name: Install Safety
         run: |
-          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo deb https://aquasecurity.github.io/trivy-repo/deb stable main | sudo tee -a /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update -y
-          sudo apt-get install -y trivy
+          python -m pip install --upgrade pip
+          pip install safety
 
-      - name: Run Bandit SAST (Python)
+      - name: Run Safety Scan
+        run: safety check
+
+      # Install Bandit (Python SAST)
+      - name: Install Bandit
+        run: pip install bandit
+
+      - name: Run Bandit SAST
         run: |
-          python -m pip install bandit
           mkdir -p reports
           bandit -r . -f json -o reports/bandit-report.json || true
 
@@ -86,13 +88,17 @@ jobs:
           name: bandit-report
           path: reports/bandit-report.json
 
-      - name: Build image for Trivy scan (local image)
+      # Install Docker (for Trivy)
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image for Trivy scan
         run: docker build -t ${{ env.IMAGE_NAME }}:ci-scan .
 
       - name: Run Trivy image scan
         run: |
           mkdir -p reports
-          trivy image --exit-code 1 --severity HIGH,CRITICAL --format json -o reports/trivy-image-report.json ${{ env.IMAGE_NAME }}:ci-scan
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $PWD:/app aquasec/trivy:latest image --exit-code 1 --severity HIGH,CRITICAL --format json -o reports/trivy-image-report.json ${{ env.IMAGE_NAME }}:ci-scan
 
       - name: Upload Trivy report
         uses: actions/upload-artifact@v4
